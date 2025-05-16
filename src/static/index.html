@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Whisper.cpp Transcription Service</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #2a6496;
+            margin-bottom: 20px;
+        }
+        
+        .container {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        input[type="file"], 
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        
+        button {
+            background-color: #2a6496;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        button:hover {
+            background-color: #1d4567;
+        }
+        
+        .result-container {
+            border-left: 4px solid #2a6496;
+            padding-left: 15px;
+            margin-top: 20px;
+            background-color: #f0f7ff;
+            border-radius: 4px;
+            padding: 15px;
+            display: none;
+        }
+        
+        #transcription {
+            white-space: pre-wrap;
+            font-size: 16px;
+        }
+        
+        .segments {
+            margin-top: 20px;
+            background-color: #f9f9f9;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .segment {
+            padding: 8px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .segment:nth-child(even) {
+            background-color: #f5f5f5;
+        }
+        
+        .speaker-change {
+            background-color: #fff3cd;
+            font-weight: bold;
+        }
+        
+        .timestamp {
+            color: #666;
+            font-size: 14px;
+            font-family: monospace;
+            margin-right: 10px;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #2a6496;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .models-container {
+            margin-top: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 10px;
+        }
+        
+        .model-card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background-color: white;
+        }
+        
+        .model-card h3 {
+            margin-top: 0;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            margin-right: 5px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .badge-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        
+        .badge-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .error {
+            color: #721c24;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Whisper.cpp Transcription Service</h1>
+    
+    <div class="container">
+        <h2>Upload Audio</h2>
+        <div id="error-container" class="error" style="display: none;"></div>
+        
+        <form id="upload-form">
+            <div class="form-group">
+                <label for="audio-file">Audio File:</label>
+                <input type="file" id="audio-file" accept="audio/*" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="model-select">Model:</label>
+                <select id="model-select">
+                    <option value="base.en">base.en (Default)</option>
+                    <!-- Other models will be populated dynamically -->
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="enable-diarization">
+                    Enable Speaker Diarization (requires compatible model)
+                </label>
+            </div>
+            
+            <button type="submit" id="submit-button">Transcribe Audio</button>
+        </form>
+        
+        <div class="loading" id="loading">
+            <p>Processing transcription... This may take a few minutes depending on the file size and model.</p>
+            <div class="spinner"></div>
+        </div>
+    </div>
+    
+    <div class="result-container" id="result-container">
+        <h2>Transcription Result</h2>
+        <div id="transcription"></div>
+        
+        <h3>Segments</h3>
+        <div class="segments" id="segments-container"></div>
+    </div>
+    
+    <div class="container">
+        <h2>Available Models</h2>
+        <p>Click on a model to download it if not already available.</p>
+        <div id="models-container" class="models-container">
+            <!-- Models will be populated here -->
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fetch available models
+            fetchModels();
+            
+            // Handle form submission
+            document.getElementById('upload-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                submitForm();
+            });
+            
+            // Handle model selection dependent on diarization option
+            document.getElementById('enable-diarization').addEventListener('change', function() {
+                updateModelSelection();
+            });
+        });
+        
+        function fetchModels() {
+            fetch('/models')
+                .then(response => response.json())
+                .then(data => {
+                    populateModelSelect(data);
+                    displayModelCards(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching models:', error);
+                    showError('Failed to fetch available models. Please refresh the page.');
+                });
+        }
+        
+        function populateModelSelect(models) {
+            const select = document.getElementById('model-select');
+            select.innerHTML = ''; // Clear existing options
+            
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.name;
+                option.text = `${model.name}${model.supports_diarization ? ' (Diarization)' : ''}${model.is_downloaded ? ' - Downloaded' : ''}`;
+                option.dataset.downloaded = model.is_downloaded;
+                option.dataset.diarization = model.supports_diarization;
+                select.appendChild(option);
+            });
+            
+            // Select base.en by default if available
+            const baseEnOption = Array.from(select.options).find(option => option.value === 'base.en');
+            if (baseEnOption) {
+                baseEnOption.selected = true;
+            }
+            
+            updateModelSelection();
+        }
+        
+        function updateModelSelection() {
+            const diarizationEnabled = document.getElementById('enable-diarization').checked;
+            const select = document.getElementById('model-select');
+            
+            // If diarization is enabled, filter to only show diarization-capable models
+            Array.from(select.options).forEach(option => {
+                if (diarizationEnabled && option.dataset.diarization === 'false') {
+                    option.style.display = 'none';
+                } else {
+                    option.style.display = '';
+                }
+            });
+            
+            // If current selection is hidden, select the first visible option
+            if (select.selectedOptions[0].style.display === 'none') {
+                const firstVisibleOption = Array.from(select.options).find(option => option.style.display !== 'none');
+                if (firstVisibleOption) {
+                    firstVisibleOption.selected = true;
+                }
+            }
+        }
+        
+        function displayModelCards(models) {
+            const container = document.getElementById('models-container');
+            container.innerHTML = ''; // Clear existing cards
+            
+            models.forEach(model => {
+                const card = document.createElement('div');
+                card.className = 'model-card';
+                
+                const title = document.createElement('h3');
+                title.textContent = model.name;
+                
+                const status = document.createElement('div');
+                if (model.is_downloaded) {
+                    status.innerHTML = '<span class="badge badge-success">Downloaded</span>';
+                } else {
+                    status.innerHTML = '<span class="badge badge-warning">Not Downloaded</span>';
+                }
+                
+                if (model.supports_diarization) {
+                    status.innerHTML += ' <span class="badge badge-info">Diarization</span>';
+                }
+                
+                const button = document.createElement('button');
+                if (model.is_downloaded) {
+                    button.textContent = 'Downloaded';
+                    button.disabled = true;
+                } else {
+                    button.textContent = 'Download';
+                    button.addEventListener('click', function() {
+                        downloadModel(model.name, button);
+                    });
+                }
+                
+                card.appendChild(title);
+                card.appendChild(status);
+                card.appendChild(button);
+                container.appendChild(card);
+            });
+        }
+        
+        function downloadModel(modelName, button) {
+            button.textContent = 'Downloading...';
+            button.disabled = true;
+            
+            fetch(`/models/${modelName}/download`, {
+                method: 'POST'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    alert(`Model download started: ${data.message}`);
+                    setTimeout(fetchModels, 2000); // Refresh model list after a delay
+                })
+                .catch(error => {
+                    console.error('Error downloading model:', error);
+                    button.textContent = 'Download Failed';
+                    button.disabled = false;
+                    showError('Failed to start model download. Please try again.');
+                });
+        }
+        
+        function submitForm() {
+            const fileInput = document.getElementById('audio-file');
+            const modelSelect = document.getElementById('model-select');
+            const diarizationCheckbox = document.getElementById('enable-diarization');
+            const loadingDiv = document.getElementById('loading');
+            const resultContainer = document.getElementById('result-container');
+            
+            // Check if file is selected
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showError('Please select an audio file.');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            
+            // Check if model is downloaded
+            const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+            if (selectedOption.dataset.downloaded !== 'true') {
+                if (!confirm(`Model "${selectedOption.value}" is not downloaded yet. Do you want to download it now?`)) {
+                    return;
+                }
+                
+                // Download model first
+                downloadModel(selectedOption.value, document.getElementById('submit-button'));
+                return;
+            }
+            
+            // Check if diarization is enabled but model doesn't support it
+            if (diarizationCheckbox.checked && selectedOption.dataset.diarization !== 'true') {
+                showError('Selected model does not support diarization. Please choose a model with diarization support or disable diarization.');
+                return;
+            }
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('audio_file', file);
+            formData.append('model', selectedOption.value);
+            formData.append('enable_diarization', diarizationCheckbox.checked);
+            
+            // Show loading indicator
+            loadingDiv.style.display = 'block';
+            resultContainer.style.display = 'none';
+            document.getElementById('submit-button').disabled = true;
+            hideError();
+            
+            // Submit form
+            fetch('/transcribe', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.error || 'Transcription failed');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    displayResults(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showError(error.message || 'Transcription failed. Please try again.');
+                })
+                .finally(() => {
+                    loadingDiv.style.display = 'none';
+                    document.getElementById('submit-button').disabled = false;
+                });
+        }
+        
+        function displayResults(data) {
+            const resultContainer = document.getElementById('result-container');
+            const transcriptionDiv = document.getElementById('transcription');
+            const segmentsContainer = document.getElementById('segments-container');
+            
+            // Display transcription
+            transcriptionDiv.textContent = data.text;
+            
+            // Display segments
+            segmentsContainer.innerHTML = '';
+            data.segments.forEach(segment => {
+                const segmentDiv = document.createElement('div');
+                segmentDiv.className = 'segment';
+                
+                // Check for speaker change
+                if (segment.text.includes('[SPEAKER_TURN]')) {
+                    segmentDiv.classList.add('speaker-change');
+                    segment.text = segment.text.replace('[SPEAKER_TURN]', '');
+                }
+                
+                // Format timestamp
+                const t0 = formatTime(segment.t0);
+                const t1 = formatTime(segment.t1);
+                
+                segmentDiv.innerHTML = `<span class="timestamp">[${t0} → ${t1}]</span> ${segment.text}`;
+                segmentsContainer.appendChild(segmentDiv);
+            });
+            
+            // Show result container
+            resultContainer.style.display = 'block';
+        }
+        
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            const ms = Math.floor((seconds % 1) * 1000);
+            
+            return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+        }
+        
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.textContent = message;
+            errorContainer.style.display = 'block';
+        }
+        
+        function hideError() {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.style.display = 'none';
+        }
+    </script>
+</body>
+</html>

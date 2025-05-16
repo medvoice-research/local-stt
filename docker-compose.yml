@@ -1,0 +1,25 @@
+version: '3'
+
+services:
+  whisper-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the models directory so downloaded models persist between container restarts
+      - ./models:/app/models
+      # Mount the temp uploads directory for debugging if needed
+      - ./temp_uploads:/app/temp_uploads
+    environment:
+      # Configure any environment variables here
+      - DEFAULT_MODEL=base.en
+    restart: unless-stopped
+    # Increase timeout for large audio files
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
