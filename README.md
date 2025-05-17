@@ -11,7 +11,6 @@ This project provides a FastAPI web service for offline transcription and diariz
 - **Multiple Models**: Support for various model sizes (tiny, base, small, medium, large)
 - **Diarization**: Speaker segmentation with compatible models
 - **Offline Operation**: All processing happens locally, no data leaves your machine
-- **Docker Support**: Easy deployment with Docker and docker-compose
 - **On-demand Model Downloads**: Automatic model management with visual indicators for download status
 - **Support for Various Audio Formats**: Through FFmpeg integration
 
@@ -23,23 +22,7 @@ This project provides a FastAPI web service for offline transcription and diariz
 
 ## Quick Start
 
-### Option 1: Using Docker (Recommended)
-
-1. Make sure you have Docker and docker-compose installed
-2. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/whispercpp-experimental.git
-   cd whispercpp-experimental
-   ```
-
-3. Start the service:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. Open your browser and go to `http://localhost:8000`
-
-### Option 2: Native Installation
+### Native Installation
 
 1. Clone this repository:
    ```bash
@@ -47,28 +30,52 @@ This project provides a FastAPI web service for offline transcription and diariz
    cd whispercpp-experimental
    ```
 
-2. Build whisper.cpp (see [whisper.cpp repository](https://github.com/ggml-org/whisper.cpp) for detailed instructions):
+2. You have several options to set up the service:
+
+   **Option 1: Complete setup (recommended for first-time users)**
    ```bash
-   git clone https://github.com/ggml-org/whisper.cpp.git
-   cd whisper.cpp
-   cmake -B build
-   cmake --build build --config Release
-   # Make the whisper-cli executable available in your PATH
-   export PATH=$PATH:$(pwd)/build/bin
-   cd ..
+   # Creates virtual environment, installs dependencies,
+   # builds whisper.cpp, creates symlink, and downloads base models
+   make setup-all
    ```
 
-3. Install Python dependencies:
+   **Option 2: Step-by-step setup**
    ```bash
-   pip install -r requirements.txt
+   # Create a virtual environment (optional)
+   make venv
+   
+   # Install Python dependencies
+   make install
+   
+   # Build whisper.cpp from source
+   make build-whisper
+   
+   # Create a symlink to whisper-cli
+   make link-whisper
+   
+   # Download specific models (e.g., base.en, small.en-tdrz)
+   make download-model MODEL=base.en
+   make download-model MODEL=small.en-tdrz
    ```
 
-4. Run the service:
+3. Run the service:
    ```bash
-   ./run_service.sh
+   make start
    ```
 
-5. Open your browser and go to `http://localhost:8000`
+4. Open your browser and go to `http://localhost:8000`
+
+5. Additional commands:
+   ```bash
+   # List available models
+   make models
+   
+   # Stop the running service
+   make stop
+   
+   # Clean temporary files
+   make clean
+   ```
 
 ## Configuration
 
@@ -165,40 +172,6 @@ curl -X POST http://localhost:8000/transcribe \
   -F "enable_diarization=false"
 ```
 
-### Example API Usage (Python)
-
-```python
-import requests
-
-# API endpoint
-url = "http://localhost:8000/transcribe"
-
-# Audio file to transcribe
-audio_file = "example.mp3"
-
-# Parameters
-params = {
-    "model": "base.en",  # or any other model: tiny.en, small.en, etc.
-    "enable_diarization": "false"  # set to "true" with compatible models
-}
-
-# Create the multipart form request
-files = {
-    "audio_file": open(audio_file, "rb")
-}
-
-# Send the request
-response = requests.post(url, files=files, data=params)
-result = response.json()
-
-# Process the result
-print("Transcription:", result["text"])
-
-# Process segments
-for segment in result["segments"]:
-    print(f"[{segment['t0']} - {segment['t1']}] {segment['text']}")
-```
-
 ## Project Structure
 
 - `src/`: Python source code for the FastAPI service
@@ -208,8 +181,6 @@ for segment in result["segments"]:
   - `static/`: Contains web UI files
 - `models/`: Directory for downloaded whisper models
 - `temp_uploads/`: Temporary storage for uploaded files
-- `Dockerfile`: Docker configuration
-- `docker-compose.yml`: Docker Compose configuration
 - `run_service.sh`: Script to run the service locally
 
 ## Contributing

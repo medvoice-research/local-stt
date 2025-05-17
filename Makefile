@@ -103,27 +103,6 @@ download-model:
 		exit 1; \
 	fi
 
-# Build Docker image
-docker-build:
-	@echo "Building Docker image..."
-	docker-compose build
-
-# Start Docker service
-docker-up:
-	@echo "Starting Docker service..."
-	docker-compose up -d
-
-# Stop Docker service
-docker-down:
-	@echo "Stopping Docker service..."
-	docker-compose down
-
-# Run tests
-test:
-	@echo "Running tests..."
-	pytest -xvs tests/
-
-
 # Build whisper.cpp
 build-whisper:
 	@echo "Building whisper.cpp..."

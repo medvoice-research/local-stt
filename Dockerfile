@@ -38,8 +38,6 @@ RUN git clone https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp \
 
 # Copy application files
 COPY src/ /app/src/
-COPY models/ /app/models/
-COPY README_FASTAPI_SERVICE.md /app/README.md
 
 # Create required directories
 RUN mkdir -p /app/temp_uploads

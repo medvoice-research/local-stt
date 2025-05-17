@@ -9,7 +9,7 @@ services:
       - "8000:8000"
     volumes:
       # Mount the models directory so downloaded models persist between container restarts
-      - ./models:/app/models
+      - ./scr/models:/app/models
       # Mount the temp uploads directory for debugging if needed
       - ./temp_uploads:/app/temp_uploads
     environment:
