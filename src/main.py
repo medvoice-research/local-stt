@@ -1,31 +1,33 @@
-import os
 import logging
+import os
 import shutil
-from pathlib import Path
-from typing import List, Optional
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import List
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse, HTMLResponse
+import uvicorn
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import uvicorn
 
-from model_manager import download_model, list_available_models, list_downloaded_models, MODELS_DIR
+from model_manager import MODELS_DIR, download_model, list_available_models, list_downloaded_models
 from transcription_service import TranscriptionService
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Configuration
 TEMP_UPLOAD_DIR = Path("temp_uploads")
-WHISPER_BIN_PATH = os.environ.get("WHISPER_BIN_PATH", "whisper-cli")  # Default to whisper-cli in PATH
+WHISPER_BIN_PATH = os.environ.get(
+    "WHISPER_BIN_PATH", "whisper-cli"
+)  # Default to whisper-cli in PATH
 DEFAULT_MODEL = "base.en"
+STATIC_DIR = Path("static")
 
-# Ensure temp directory exists
-if not TEMP_UPLOAD_DIR.exists():
-    TEMP_UPLOAD_DIR.mkdir(parents=True)
 
 # Define models for responses
 class ModelInfo(BaseModel):
@@ -34,48 +36,61 @@ class ModelInfo(BaseModel):
     supports_diarization: bool
     is_downloaded: bool
 
+
 class TranscriptionRequest(BaseModel):
     model: str = DEFAULT_MODEL
     enable_diarization: bool = False
+
 
 class TranscriptionResponse(BaseModel):
     text: str
     segments: List[dict]
     language: str
 
-# Path to static files
-STATIC_DIR = Path("static")
+
+def ensure_temp_directory():
+    """Ensure the temporary upload directory exists"""
+    if not TEMP_UPLOAD_DIR.exists():
+        TEMP_UPLOAD_DIR.mkdir(parents=True)
+        logger.info(f"Created temporary upload directory: {TEMP_UPLOAD_DIR}")
+    return TEMP_UPLOAD_DIR
+
+
+def clean_temp_directory():
+    """Clean up files in the temporary upload directory"""
+    try:
+        # Clean up temp_uploads directory
+        if TEMP_UPLOAD_DIR.exists():
+            # Remove all files but keep the directory
+            for file_path in TEMP_UPLOAD_DIR.glob("*"):
+                if file_path.is_file():
+                    file_path.unlink()
+                elif file_path.is_dir():
+                    shutil.rmtree(file_path)
+            logger.info(f"Cleaned up temporary upload directory: {TEMP_UPLOAD_DIR}")
+        return True
+    except Exception as e:
+        logger.error(f"Error cleaning up temporary upload directory: {str(e)}")
+        return False
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event for FastAPI"""
     # Code to run on startup
     logger.info("Starting up the FastAPI application")
-    # Ensure temp directory exists
-    if not TEMP_UPLOAD_DIR.exists():
-        TEMP_UPLOAD_DIR.mkdir(parents=True)
-        logger.info(f"Created temporary upload directory: {TEMP_UPLOAD_DIR}")
+    ensure_temp_directory()
     yield
     # Cleanup on shutdown
-    try:
-        # Clean up temp_uploads directory
-        if TEMP_UPLOAD_DIR.exists():
-            # Remove all files but keep the directory
-            for file_path in TEMP_UPLOAD_DIR.glob('*'):
-                if file_path.is_file():
-                    file_path.unlink()
-                elif file_path.is_dir():
-                    shutil.rmtree(file_path)
-            logger.info(f"Cleaned up temporary upload directory: {TEMP_UPLOAD_DIR}")
-    except Exception as e:
-        logger.error(f"Error cleaning up temporary upload directory: {str(e)}")
+    clean_temp_directory()
+
 
 # Initialize FastAPI with lifespan
 app = FastAPI(
     title="Whisper.cpp API",
     description="API for transcribing audio files using whisper.cpp",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Enable CORS
@@ -91,17 +106,16 @@ app.add_middleware(
 current_model = None
 transcription_service = None
 
+
 def initialize_transcription_service(model_name: str):
     """Initialize or update the transcription service with the specified model"""
     global transcription_service, current_model
-    
+
     try:
         model_path = download_model(model_name)
         if model_path and model_path.exists():
             transcription_service = TranscriptionService(
-                model_path=model_path,
-                whisper_bin=WHISPER_BIN_PATH,
-                temp_dir=TEMP_UPLOAD_DIR
+                model_path=model_path, whisper_bin=WHISPER_BIN_PATH, temp_dir=TEMP_UPLOAD_DIR
             )
             current_model = model_name
             logger.info(f"Initialized transcription service with model {model_name}")
@@ -113,11 +127,16 @@ def initialize_transcription_service(model_name: str):
         logger.error(f"Error initializing transcription service: {str(e)}")
         return False
 
+
+# Ensure temp directory exists at startup
+ensure_temp_directory()
+
 # Initialize with default model
 initialize_transcription_service(DEFAULT_MODEL)
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def get_html():
@@ -125,6 +144,7 @@ async def get_html():
     html_file = STATIC_DIR / "index.html"
     with open(html_file, "r") as f:
         return f.read()
+
 
 @app.get("/api")
 async def root():
@@ -137,29 +157,33 @@ async def root():
             {"path": "/", "method": "GET", "description": "This information"},
             {"path": "/models", "method": "GET", "description": "List available models"},
             {"path": "/transcribe", "method": "POST", "description": "Transcribe an audio file"},
-        ]
+        ],
     }
+
 
 @app.get("/models", response_model=List[ModelInfo])
 async def get_models():
     """List all available models and their status"""
     available_models = list_available_models()
     downloaded_models = list_downloaded_models()
-    
+
     models_info = []
     for model_name in available_models:
         is_downloaded = model_name in downloaded_models
         supports_diarization = "tdrz" in model_name
         model_path = str(MODELS_DIR / f"ggml-{model_name}.bin") if is_downloaded else ""
-        
-        models_info.append(ModelInfo(
-            name=model_name,
-            path=model_path,
-            supports_diarization=supports_diarization,
-            is_downloaded=is_downloaded
-        ))
-    
+
+        models_info.append(
+            ModelInfo(
+                name=model_name,
+                path=model_path,
+                supports_diarization=supports_diarization,
+                is_downloaded=is_downloaded,
+            )
+        )
+
     return models_info
+
 
 @app.post("/models/{model_name}/download")
 async def download_specific_model(model_name: str, background_tasks: BackgroundTasks):
@@ -173,43 +197,46 @@ async def download_specific_model(model_name: str, background_tasks: BackgroundT
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error downloading model: {str(e)}")
 
+
+def save_uploaded_file(upload_file: UploadFile) -> Path:
+    """Save an uploaded file to the temp directory and return the path"""
+    if not upload_file.filename:
+        raise HTTPException(status_code=400, detail="Missing filename in uploaded file")
+    file_path = TEMP_UPLOAD_DIR / upload_file.filename
+    try:
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(upload_file.file, f)
+        return file_path
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving uploaded file: {str(e)}")
+    finally:
+        upload_file.file.close()
+
+
 @app.post("/transcribe")
 async def transcribe_audio(
     audio_file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL),
-    enable_diarization: bool = Form(False)
+    enable_diarization: bool = Form(False),
 ):
     """Transcribe an uploaded audio file"""
     global transcription_service, current_model
-    
+
     # Check if we need to change models
     if not current_model or current_model != model:
         success = initialize_transcription_service(model)
         if not success:
             raise HTTPException(
-                status_code=500, 
-                detail=f"Failed to initialize model {model}. Please check if it's available."
+                status_code=500,
+                detail=f"Failed to initialize model {model}. Please check if it's available.",
             )
-    
+
     if not transcription_service:
-        raise HTTPException(
-            status_code=500, 
-            detail="Transcription service not initialized"
-        )
-    
+        raise HTTPException(status_code=500, detail="Transcription service not initialized")
+
     # Save uploaded file to temp directory
-    file_path = TEMP_UPLOAD_DIR / audio_file.filename
-    try:
-        with open(file_path, "wb") as f:
-            shutil.copyfileobj(audio_file.file, f)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error saving uploaded file: {str(e)}"
-        )
-    finally:
-        audio_file.file.close()
-    
+    file_path = save_uploaded_file(audio_file)
+
     try:
         # Check diarization capability
         model_info = transcription_service.get_model_info()
@@ -217,44 +244,43 @@ async def transcribe_audio(
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "Diarization requested but current model does not support it. Please use a model with '-tdrz' suffix."
-                }
+                    "error": "Diarization requested but current model does not support it. "
+                    "Please use a model with '-tdrz' suffix."
+                },
             )
-        
+
         # Process the transcription
         result = transcription_service.transcribe(
-            audio_path=file_path,
-            enable_diarization=enable_diarization
+            audio_path=file_path, enable_diarization=enable_diarization
         )
-        
+
         # Check for errors
         if "error" in result:
-            return JSONResponse(
-                status_code=500,
-                content=result
-            )
-        
+            return JSONResponse(status_code=500, content=result)
+
         return result
     except Exception as e:
         logger.exception("Error during transcription")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Transcription error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
     finally:
         # Clean up the uploaded file
         if file_path.exists():
             os.unlink(file_path)
 
+
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Run the whisper.cpp FastAPI service")
-    parser.add_argument("--port", type=int, default=8000, help="Port to run the service on (default: 8000)")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the service on (default: 0.0.0.0)")
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port to run the service on (default: 8000)"
+    )
+    parser.add_argument(
+        "--host", type=str, default="0.0.0.0", help="Host to run the service on (default: 0.0.0.0)"
+    )
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload on file changes")
-    
+
     args = parser.parse_args()
-    
+
     logger.info(f"Starting server on {args.host}:{args.port}")
     uvicorn.run("main:app", host=args.host, port=args.port, reload=args.reload)

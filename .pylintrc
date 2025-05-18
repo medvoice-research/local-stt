@@ -1,0 +1,111 @@
+[MASTER]
+ignore=CVS,venv,build,dist
+ignore-patterns=
+persistent=yes
+load-plugins=
+jobs=1
+unsafe-load-any-extension=no
+extension-pkg-whitelist=
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    line-too-long,
+    too-few-public-methods,
+    bad-continuation,
+    no-member,
+    protected-access,
+    fixme,
+    invalid-name,
+    import-error,
+    no-name-in-module,
+    duplicate-code,
+    too-many-arguments,
+    too-many-locals,
+    too-many-instance-attributes,
+    too-many-branches,
+    broad-except,
+    redefined-outer-name,
+    logging-fstring-interpolation,
+    raise-missing-from,
+    global-variable-not-assigned,
+    global-statement,
+    unspecified-encoding,
+    no-else-return,
+    unused-argument,
+    import-outside-toplevel,
+    missing-timeout
+
+[REPORTS]
+output-format=text
+files-output=no
+reports=yes
+evaluation=10.0 - ((float(5 * error + warning + refactor + convention) / statement) * 10)
+
+[VARIABLES]
+init-import=no
+dummy-variables-rgx=_$|dummy
+additional-builtins=
+callbacks=cb_,_cb
+
+[FORMAT]
+max-line-length=100
+ignore-long-lines=^\s*(# )?<?https?://\S+>?$
+single-line-if-stmt=no
+no-space-check=trailing-comma,dict-separator
+max-module-lines=1000
+indent-string='    '
+indent-after-paren=4
+expected-line-ending-format=
+
+[BASIC]
+good-names=i,j,k,ex,Run,_
+bad-names=foo,bar,baz,toto,tutu,tata
+name-group=
+include-naming-hint=no
+function-rgx=[a-z_][a-z0-9_]{2,30}$
+function-name-hint=[a-z_][a-z0-9_]{2,30}$
+variable-rgx=[a-z_][a-z0-9_]{2,30}$
+variable-name-hint=[a-z_][a-z0-9_]{2,30}$
+const-rgx=(([A-Z_][A-Z0-9_]*)|(__.*__))$
+const-name-hint=(([A-Z_][A-Z0-9_]*)|(__.*__))$
+attr-rgx=[a-z_][a-z0-9_]{2,30}$
+attr-name-hint=[a-z_][a-z0-9_]{2,30}$
+argument-rgx=[a-z_][a-z0-9_]{2,30}$
+argument-name-hint=[a-z_][a-z0-9_]{2,30}$
+class-attribute-rgx=([A-Za-z_][A-Za-z0-9_]{2,30}|(__.*__))$
+class-attribute-name-hint=([A-Za-z_][A-Za-z0-9_]{2,30}|(__.*__))$
+inlinevar-rgx=[A-Za-z_][A-Za-z0-9_]*$
+inlinevar-name-hint=[A-Za-z_][A-Za-z0-9_]*$
+class-rgx=[A-Z_][a-zA-Z0-9]+$
+class-name-hint=[A-Z_][a-zA-Z0-9]+$
+module-rgx=(([a-z_][a-z0-9_]*)|([A-Z][a-zA-Z0-9]+))$
+module-name-hint=(([a-z_][a-z0-9_]*)|([A-Z][a-zA-Z0-9]+))$
+method-rgx=[a-z_][a-z0-9_]{2,30}$
+method-name-hint=[a-z_][a-z0-9_]{2,30}$
+no-docstring-rgx=__.*__
+docstring-min-length=-1
+
+[DESIGN]
+max-args=5
+ignored-argument-names=_.*
+max-locals=15
+max-returns=6
+max-branches=12
+max-statements=50
+max-parents=7
+max-attributes=7
+min-public-methods=2
+max-public-methods=20
+
+[CLASSES]
+ignore-iface-methods=isImplementedBy,deferred,extends,names,namesAndDescriptions,queryDescriptionFor,getBases,getDescriptionFor,getDoc,getName,getTaggedValue,getTaggedValueTags,isEqualOrExtendedBy,setTaggedValue,isImplementedByInstancesOf,adaptWith,is_implemented_by
+defining-attr-methods=__init__,__new__,setUp
+valid-classmethod-first-arg=cls
+valid-metaclass-classmethod-first-arg=cls
+exclude-protected=_asdict,_fields,_replace,_source,_make
+
+[EXCEPTIONS]
+overgeneral-exceptions=Exception

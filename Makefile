@@ -2,7 +2,7 @@
 #
 # This Makefile provides convenient commands for working with the whisper.cpp FastAPI service
 
-.PHONY: help install start stop clean models download-model docker docker-build docker-up docker-down test venv link-whisper
+.PHONY: help install start stop clean models download-model docker docker-build docker-up docker-down test venv link-whisper lint lint-black lint-flake8 lint-mypy lint-isort lint-pylint format
 
 # Default Python interpreter
 PYTHON ?= python3
@@ -38,6 +38,13 @@ help:
 	@echo "  make build-whisper        - Build whisper.cpp from source"
 	@echo "  make link-whisper         - Create symlink to whisper-cli"
 	@echo "  make setup-all            - Full setup: install, build whisper, link, download base models"
+	@echo "  make lint                 - Run all linters"
+	@echo "  make lint-black           - Run black linter in check mode"
+	@echo "  make lint-flake8          - Run flake8 linter"
+	@echo "  make lint-mypy            - Run mypy type checker"
+	@echo "  make lint-isort           - Run isort import checker"
+	@echo "  make lint-pylint          - Run pylint"
+	@echo "  make format               - Format code with black and isort"
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  PORT                      - Port for the FastAPI service (default: 8000)"
@@ -59,6 +66,7 @@ venv:
 
 # Start the service
 start:
+	@echo "Activate the virtual environment with source venv/bin/activate"
 	@echo "Starting whisper.cpp FastAPI service on port $(PORT)..."
 	@if [ "$(RELOAD)" = "true" ]; then \
 		cd src && $(PYTHON) main.py --port $(PORT) --host 0.0.0.0 --reload; \
@@ -130,3 +138,33 @@ setup-all: venv install build-whisper link-whisper
 	@cd whisper.cpp && bash models/download-ggml-model.sh base.en
 	@cd whisper.cpp && bash models/download-ggml-model.sh small.en-tdrz
 	@echo "Setup complete. You can now run 'make start' to start the service."
+
+# Linting commands
+lint: lint-black lint-flake8 lint-mypy lint-isort lint-pylint
+	@echo "All linting checks passed!"
+
+lint-black:
+	@echo "Running black in check mode..."
+	$(PYTHON) -m black --check src/
+
+lint-flake8:
+	@echo "Running flake8..."
+	$(PYTHON) -m flake8 src/
+
+lint-mypy:
+	@echo "Running mypy type checking..."
+	$(PYTHON) -m mypy --namespace-packages src/
+
+lint-isort:
+	@echo "Checking imports with isort..."
+	$(PYTHON) -m isort --check-only src/
+
+lint-pylint:
+	@echo "Running pylint..."
+	$(PYTHON) -m pylint src/
+
+format:
+	@echo "Formatting code with black and isort..."
+	$(PYTHON) -m black src/
+	$(PYTHON) -m isort src/
+	@echo "Code formatting complete!"
