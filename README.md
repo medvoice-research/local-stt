@@ -176,33 +176,15 @@ curl -X POST http://localhost:8000/transcribe \
 
 ### Linting and Code Quality
 
-This project uses several linting and code quality tools to maintain consistent code style and catch potential issues:
-
-1. **Black**: Code formatter that enforces a consistent style
-2. **isort**: Sorts and organizes import statements
-3. **flake8**: Checks for PEP 8 compliance and common errors
-4. **mypy**: Static type checker for Python
-5. **pylint**: In-depth code analysis for bugs and quality issues
-
 You can run all linters at once with:
 ```bash
 make lint
-```
-
-Or run individual linters:
-```bash
-make lint-black     # Check code formatting with Black
-make lint-flake8    # Run flake8 linter
-make lint-mypy      # Run type checking
-make lint-isort     # Check import sorting
-make lint-pylint    # Run pylint
 ```
 
 To automatically format your code:
 ```bash
 make format         # Runs black and isort to format code
 ```
-
 
 ## Project Structure
 
