@@ -3,7 +3,7 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
@@ -35,6 +35,11 @@ class ModelInfo(BaseModel):
     path: str
     supports_diarization: bool
     is_downloaded: bool
+    size_mb: int
+    multilingual: bool
+    params: str
+    quantized: bool
+    quantization_method: Optional[str] = None
 
 
 class TranscriptionRequest(BaseModel):
@@ -164,14 +169,22 @@ async def root():
 @app.get("/models", response_model=List[ModelInfo])
 async def get_models():
     """List all available models and their status"""
+    from models_data import MODEL_INFO
+
     available_models = list_available_models()
     downloaded_models = list_downloaded_models()
 
     models_info = []
     for model_name in available_models:
         is_downloaded = model_name in downloaded_models
-        supports_diarization = "tdrz" in model_name
+        model_info: Dict[str, Any] = MODEL_INFO[model_name]
         model_path = str(MODELS_DIR / f"ggml-{model_name}.bin") if is_downloaded else ""
+
+        # Determine if model supports diarization
+        supports_diarization = bool(model_info.get("diarization", False) or "tdrz" in model_name)
+
+        # Get quantization method if applicable
+        quantization_method = model_info.get("quantization")
 
         models_info.append(
             ModelInfo(
@@ -179,6 +192,11 @@ async def get_models():
                 path=model_path,
                 supports_diarization=supports_diarization,
                 is_downloaded=is_downloaded,
+                size_mb=int(model_info["size_mb"]),
+                multilingual=bool(model_info["multilingual"]),
+                params=str(model_info["params"]),
+                quantized=bool(model_info["quantized"]),
+                quantization_method=str(quantization_method) if quantization_method else None,
             )
         )
 

@@ -130,19 +130,48 @@
         .models-container {
             margin-top: 20px;
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 50px;
+            padding: 15px;
         }
         
         .model-card {
             border: 1px solid #ddd;
-            border-radius: 4px;
+            border-radius: 8px;
             padding: 10px;
             background-color: white;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .model-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         }
         
         .model-card h3 {
             margin-top: 0;
+            margin-bottom: 10px;
+        }
+        
+        .model-info {
+            margin: 10px 0;
+            flex-grow: 1;
+        }
+        
+        .model-info p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        
+        .model-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-bottom: 10px;
         }
         
         .badge {
@@ -227,6 +256,34 @@
     <div class="container">
         <h2>Available Models</h2>
         <p>Click on a model to download it if not already available.</p>
+        
+        <div class="filter-controls">
+            <div class="form-group">
+                <label for="filter-type">Filter Models:</label>
+                <select id="filter-type" onchange="filterModels()">
+                    <option value="all">All Models</option>
+                    <option value="standard">Standard Models</option>
+                    <option value="quantized">Quantized Models</option>
+                    <option value="diarization">Diarization Support</option>
+                    <option value="english">English Only</option>
+                    <option value="multilingual">Multilingual</option>
+                    <option value="downloaded">Downloaded</option>
+                    <option value="not-downloaded">Not Downloaded</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="sort-by">Sort By:</label>
+                <select id="sort-by" onchange="filterModels()">
+                    <option value="name">Name</option>
+                    <option value="size-asc">Size (Smallest First)</option>
+                    <option value="size-desc">Size (Largest First)</option>
+                    <option value="params-asc">Parameters (Lowest First)</option>
+                    <option value="params-desc">Parameters (Highest First)</option>
+                </select>
+            </div>
+        </div>
+        
         <div id="models-container" class="models-container">
             <!-- Models will be populated here -->
         </div>
@@ -253,8 +310,13 @@
             fetch('/models')
                 .then(response => response.json())
                 .then(data => {
+                    // Store all models in the global variable
+                    allModels = data;
                     populateModelSelect(data);
                     displayModelCards(data);
+                    
+                    // Apply initial filtering
+                    filterModels();
                 })
                 .catch(error => {
                     console.error('Error fetching models:', error);
@@ -306,9 +368,83 @@
             }
         }
         
+        // Global variable to store all models
+        let allModels = [];
+        
+        function filterModels() {
+            const filterType = document.getElementById('filter-type').value;
+            const sortBy = document.getElementById('sort-by').value;
+            
+            // Apply filters
+            let filteredModels = [...allModels];
+            
+            // Apply type filter
+            switch (filterType) {
+                case 'standard':
+                    filteredModels = filteredModels.filter(model => !model.quantized);
+                    break;
+                case 'quantized':
+                    filteredModels = filteredModels.filter(model => model.quantized);
+                    break;
+                case 'diarization':
+                    filteredModels = filteredModels.filter(model => model.supports_diarization);
+                    break;
+                case 'english':
+                    filteredModels = filteredModels.filter(model => !model.multilingual);
+                    break;
+                case 'multilingual':
+                    filteredModels = filteredModels.filter(model => model.multilingual);
+                    break;
+                case 'downloaded':
+                    filteredModels = filteredModels.filter(model => model.is_downloaded);
+                    break;
+                case 'not-downloaded':
+                    filteredModels = filteredModels.filter(model => !model.is_downloaded);
+                    break;
+                // 'all' case - no filtering needed
+            }
+            
+            // Apply sorting
+            switch (sortBy) {
+                case 'size-asc':
+                    filteredModels.sort((a, b) => a.size_mb - b.size_mb);
+                    break;
+                case 'size-desc':
+                    filteredModels.sort((a, b) => b.size_mb - a.size_mb);
+                    break;
+                case 'params-asc':
+                    filteredModels.sort((a, b) => {
+                        const paramsA = parseInt(a.params.replace(/[^\d]/g, ''));
+                        const paramsB = parseInt(b.params.replace(/[^\d]/g, ''));
+                        return paramsA - paramsB;
+                    });
+                    break;
+                case 'params-desc':
+                    filteredModels.sort((a, b) => {
+                        const paramsA = parseInt(a.params.replace(/[^\d]/g, ''));
+                        const paramsB = parseInt(b.params.replace(/[^\d]/g, ''));
+                        return paramsB - paramsA;
+                    });
+                    break;
+                default: // 'name'
+                    filteredModels.sort((a, b) => a.name.localeCompare(b.name));
+            }
+            
+            // Update display
+            displayModelCards(filteredModels);
+        }
+        
         function displayModelCards(models) {
             const container = document.getElementById('models-container');
             container.innerHTML = ''; // Clear existing cards
+            
+            if (models.length === 0) {
+                const noResults = document.createElement('div');
+                noResults.className = 'no-results';
+                noResults.textContent = 'No models match the selected filters.';
+                container.appendChild(noResults);
+                return;
+            }
             
             models.forEach(model => {
                 const card = document.createElement('div');
@@ -317,16 +453,44 @@
                 const title = document.createElement('h3');
                 title.textContent = model.name;
                 
-                const status = document.createElement('div');
+                // Create badges container
+                const badges = document.createElement('div');
+                badges.className = 'model-badges';
+                
+                // Download status badge
                 if (model.is_downloaded) {
-                    status.innerHTML = '<span class="badge badge-success">Downloaded</span>';
+                    badges.innerHTML += '<span class="badge badge-success">Downloaded</span>';
                 } else {
-                    status.innerHTML = '<span class="badge badge-warning">Not Downloaded</span>';
+                    badges.innerHTML += '<span class="badge badge-warning">Not Downloaded</span>';
                 }
                 
-                if (model.supports_diarization) {
-                    status.innerHTML += ' <span class="badge badge-info">Diarization</span>';
+                // Language badge
+                if (model.multilingual) {
+                    badges.innerHTML += '<span class="badge badge-info">Multilingual</span>';
+                } else {
+                    badges.innerHTML += '<span class="badge badge-info">English-only</span>';
                 }
+                
+                // Diarization badge
+                if (model.supports_diarization) {
+                    badges.innerHTML += '<span class="badge badge-info">Diarization</span>';
+                }
+                
+                // Quantization badge
+                if (model.quantized) {
+                    const method = model.quantization_method || 'Quantized';
+                    badges.innerHTML += `<span class="badge badge-success">${method}</span>`;
+                }
+                
+                // Create model info section
+                const info = document.createElement('div');
+                info.className = 'model-info';
+                
+                // Add model details
+                info.innerHTML = `
+                    <p><strong>Size:</strong> ${model.size_mb} MB</p>
+                    <p><strong>Parameters:</strong> ${model.params}</p>
+                `;
                 
                 const button = document.createElement('button');
                 if (model.is_downloaded) {
@@ -340,7 +504,8 @@
                 }
                 
                 card.appendChild(title);
-                card.appendChild(status);
+                card.appendChild(badges);
+                card.appendChild(info);
                 card.appendChild(button);
                 container.appendChild(card);
             });

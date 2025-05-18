@@ -158,11 +158,29 @@ class TranscriptionService:
 
     def get_model_info(self):
         """Get information about the current model"""
-        model_name = self.model_path.stem.replace("ggml-", "")
-        is_diarization_capable = "tdrz" in model_name
+        from models_data import MODEL_INFO
 
-        return {
+        model_name = self.model_path.stem.replace("ggml-", "")
+        model_info = MODEL_INFO.get(model_name, {})
+
+        is_diarization_capable = model_info.get("diarization", False) or "tdrz" in model_name
+
+        result = {
             "model_name": model_name,
             "model_path": str(self.model_path),
             "supports_diarization": is_diarization_capable,
         }
+
+        # Add additional info if available
+        if model_info:
+            result.update(
+                {
+                    "size_mb": model_info.get("size_mb"),
+                    "multilingual": model_info.get("multilingual"),
+                    "params": model_info.get("params"),
+                    "quantized": model_info.get("quantized"),
+                    "quantization_method": model_info.get("quantization"),
+                }
+            )
+
+        return result

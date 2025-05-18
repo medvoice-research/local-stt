@@ -4,6 +4,9 @@ from pathlib import Path
 
 import requests
 
+# Import model information from the dedicated module
+from models_data import AVAILABLE_MODELS
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -12,20 +15,6 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = Path("models")
 MODEL_DOWNLOAD_SCRIPT = "download-ggml-model.sh"
 WHISPER_CPP_MODELS_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/models"
-AVAILABLE_MODELS = [
-    "tiny",
-    "tiny.en",
-    "base",
-    "base.en",
-    "small",
-    "small.en",
-    "medium",
-    "medium.en",
-    "large-v1",
-    "large-v2",
-    "large-v3",
-    "small.en-tdrz",  # Model with diarization support
-]
 
 
 def ensure_model_dir():
