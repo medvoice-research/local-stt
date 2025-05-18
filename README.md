@@ -196,9 +196,6 @@ make format         # Runs black and isort to format code
 - `models/`: Directory for downloaded whisper models
 - `temp_uploads/`: Temporary storage for uploaded files
 - `run_service.sh`: Script to run the service locally
-- `pyproject.toml`: Configuration for Black, mypy, and isort
-- `setup.cfg`: Configuration for flake8
-- `.pylintrc`: Configuration for pylint
 
 ## Contributing
 
