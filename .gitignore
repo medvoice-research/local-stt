@@ -20,6 +20,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.mypy_cache/
 
 # Virtual Environment
 venv/
@@ -64,3 +65,4 @@ Thumbs.db
 
 # Project specific
 whisper.cpp/
+.env

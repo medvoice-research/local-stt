@@ -3,17 +3,26 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import Dict, List, Optional
 
 import ffmpeg
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Import configuration
+from config import TEMP_UPLOAD_DIR as DEFAULT_TEMP_DIR
+
+# Import speaker diarization service (if available)
+try:
+    from speaker_diarization import SpeakerDiarizationService
+    PYANNOTE_AVAILABLE = True
+except ImportError:
+    PYANNOTE_AVAILABLE = False
+    logging.warning("pyannote.audio not available; advanced speaker diarization disabled")
+
 logger = logging.getLogger(__name__)
 
 
 class TranscriptionService:
-    def __init__(self, model_path, whisper_bin="whisper-cli", temp_dir="temp_uploads"):
+    def __init__(self, model_path, whisper_bin="whisper-cli", temp_dir=None, hf_token=None):
         """
         Initialize the transcription service
 
@@ -21,10 +30,21 @@ class TranscriptionService:
             model_path: Path to the whisper model file
             whisper_bin: Path to the whisper-cli binary
             temp_dir: Directory to store temporary files
+            hf_token: Hugging Face API token for accessing pyannote models
         """
         self.model_path = Path(model_path)
         self.whisper_bin = whisper_bin
-        self.temp_dir = Path(temp_dir)
+        self.temp_dir = Path(temp_dir) if temp_dir is not None else DEFAULT_TEMP_DIR
+        self.hf_token = hf_token
+        
+        # Initialize speaker diarization service if available
+        self.diarization_service = None
+        if PYANNOTE_AVAILABLE and hf_token:
+            try:
+                self.diarization_service = SpeakerDiarizationService(hf_token=hf_token)
+                logging.info("Initialized pyannote speaker diarization service")
+            except Exception as e:
+                logging.error(f"Failed to initialize speaker diarization service: {e}")
 
         if not self.temp_dir.exists():
             self.temp_dir.mkdir(parents=True)
@@ -47,7 +67,7 @@ class TranscriptionService:
             logger.error(f"Error converting audio: {e.stderr.decode() if e.stderr else str(e)}")
             raise
 
-    def transcribe(self, audio_path, enable_diarization=False):
+    def transcribe(self, audio_path, enable_diarization=False, num_speakers=None, min_speakers=None, max_speakers=None, language="auto"):
         """
         Transcribe audio file using whisper.cpp
 
@@ -70,16 +90,23 @@ class TranscriptionService:
                 "-f",
                 str(wav_path),
                 "-oj",  # Output JSON
+                "-l", language  # Use specified language or auto-detect
             ]
 
-            if enable_diarization:
+            # Check if we should use whisper.cpp's built-in diarization
+            use_whisper_diarization = enable_diarization and "tdrz" in str(self.model_path)
+            use_pyannote_diarization = (enable_diarization and self.diarization_service is not None 
+                                       and not use_whisper_diarization)
+            
+            if use_whisper_diarization:
                 # Add diarization parameter if model supports it (e.g. small.en-tdrz)
-                if "tdrz" in str(self.model_path):
-                    cmd.append("-tdrz")
-                else:
+                cmd.append("-tdrz")
+                logger.info("Using whisper.cpp built-in diarization (tinydiarize)")
+            elif enable_diarization:
+                if not self.diarization_service:
                     logger.warning(
-                        "Diarization requested but model does not support it. "
-                        "Using regular transcription."
+                        "Diarization requested but neither tinydiarize nor pyannote are available. "
+                        "Using regular transcription without diarization."
                     )
 
             cmd_str = " ".join(cmd)
@@ -106,6 +133,41 @@ class TranscriptionService:
             try:
                 # Try to parse as JSON first (if -oj flag worked as expected)
                 transcription_result = json.loads(output)
+                
+                # Apply pyannote diarization if requested and available
+                if use_pyannote_diarization:
+                    logger.info("Applying pyannote speaker diarization")
+                    try:
+                        diarization_result = self.diarization_service.diarize(
+                            audio_path=wav_path,
+                            num_speakers=num_speakers,
+                            min_speakers=min_speakers,
+                            max_speakers=max_speakers
+                        )
+                        
+                        # Align diarization with transcription segments
+                        if "segments" in transcription_result:
+                            # Convert segment timestamps to seconds if needed
+                            for segment in transcription_result["segments"]:
+                                if "start" not in segment and "t0" in segment:
+                                    segment["start"] = segment["t0"]
+                                if "end" not in segment and "t1" in segment:
+                                    segment["end"] = segment["t1"]
+                            
+                            # Add speaker labels to segments
+                            transcription_result["segments"] = self.diarization_service.align_diarization_with_transcription(
+                                diarization_result=diarization_result,
+                                transcription_segments=transcription_result["segments"]
+                            )
+                            
+                            # Add diarization metadata
+                            transcription_result["diarization"] = {
+                                "num_speakers": diarization_result["num_speakers"],
+                                "method": "pyannote"
+                            }
+                    except Exception as e:
+                        logger.error(f"Error during pyannote diarization: {e}")
+                
                 return transcription_result
             except json.JSONDecodeError:
                 logger.info("Output is not JSON format, parsing as text")

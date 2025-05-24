@@ -3,7 +3,7 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
@@ -12,21 +12,30 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from model_manager import MODELS_DIR, download_model, list_available_models, list_downloaded_models
+# Import centralized configuration
+from config import (
+    ROOT_DIR,
+    MODELS_DIR,
+    TEMP_UPLOAD_DIR,
+    WHISPER_BIN_PATH,
+    DEFAULT_MODEL,
+    STATIC_DIR,
+    HF_TOKEN,
+    HOST,
+    PORT,
+    DEBUG,
+)
+
+# Import model_manager functions
+from model_manager import (
+    clean_model_symlinks, 
+    download_model, 
+    list_available_models, 
+    list_downloaded_models
+)
 from transcription_service import TranscriptionService
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
-
-# Configuration
-TEMP_UPLOAD_DIR = Path("temp_uploads")
-WHISPER_BIN_PATH = os.environ.get(
-    "WHISPER_BIN_PATH", "whisper-cli"
-)  # Default to whisper-cli in PATH
-DEFAULT_MODEL = "base.en"
-STATIC_DIR = Path("static")
 
 
 # Define models for responses
@@ -45,6 +54,10 @@ class ModelInfo(BaseModel):
 class TranscriptionRequest(BaseModel):
     model: str = DEFAULT_MODEL
     enable_diarization: bool = False
+    num_speakers: Optional[int] = None
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+    language: str = "auto"
 
 
 class TranscriptionResponse(BaseModel):
@@ -82,13 +95,27 @@ def clean_temp_directory():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event for FastAPI"""
+    global transcription_service, current_model
+    
     # Code to run on startup
     logger.info("Starting up the FastAPI application")
     ensure_temp_directory()
+    
+    # Clean up model symlinks to ensure consistent file paths
+    logger.info("Cleaning up model symlinks")
+    clean_model_symlinks()
+    
+    # Initialize transcription service with default model
+    logger.info(f"Initializing transcription service with model {DEFAULT_MODEL}")
+    success = initialize_transcription_service(DEFAULT_MODEL)
+    if not success:
+        logger.warning(f"Failed to initialize default model {DEFAULT_MODEL}. " 
+                      f"Transcription service will be initialized on first request.")
+    
     yield
+    
     # Cleanup on shutdown
     clean_temp_directory()
-
 
 # Initialize FastAPI with lifespan
 app = FastAPI(
@@ -120,7 +147,10 @@ def initialize_transcription_service(model_name: str):
         model_path = download_model(model_name)
         if model_path and model_path.exists():
             transcription_service = TranscriptionService(
-                model_path=model_path, whisper_bin=WHISPER_BIN_PATH, temp_dir=TEMP_UPLOAD_DIR
+                model_path=model_path, 
+                whisper_bin=WHISPER_BIN_PATH, 
+                temp_dir=TEMP_UPLOAD_DIR,
+                hf_token=HF_TOKEN
             )
             current_model = model_name
             logger.info(f"Initialized transcription service with model {model_name}")
@@ -133,11 +163,10 @@ def initialize_transcription_service(model_name: str):
         return False
 
 
-# Ensure temp directory exists at startup
-ensure_temp_directory()
-
-# Initialize with default model
-initialize_transcription_service(DEFAULT_MODEL)
+# Static directory needs to exist before app starts
+if not STATIC_DIR.exists():
+    STATIC_DIR.mkdir(parents=True)
+    logger.info(f"Created static directory: {STATIC_DIR}")
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -174,6 +203,14 @@ async def get_models():
     available_models = list_available_models()
     downloaded_models = list_downloaded_models()
 
+    # Check if pyannote is available for advanced diarization
+    pyannote_available = False
+    try:
+        from speaker_diarization import SpeakerDiarizationService
+        pyannote_available = True and HF_TOKEN is not None
+    except ImportError:
+        pyannote_available = False
+
     models_info = []
     for model_name in available_models:
         is_downloaded = model_name in downloaded_models
@@ -181,7 +218,10 @@ async def get_models():
         model_path = str(MODELS_DIR / f"ggml-{model_name}.bin") if is_downloaded else ""
 
         # Determine if model supports diarization
-        supports_diarization = bool(model_info.get("diarization", False) or "tdrz" in model_name)
+        whisper_diarization = bool(model_info.get("diarization", False) or "tdrz" in model_name)
+        
+        # All models support diarization via pyannote if it's available
+        supports_diarization = whisper_diarization or pyannote_available
 
         # Get quantization method if applicable
         quantization_method = model_info.get("quantization")
@@ -236,6 +276,10 @@ async def transcribe_audio(
     audio_file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL),
     enable_diarization: bool = Form(False),
+    num_speakers: Optional[int] = Form(None),
+    min_speakers: Optional[int] = Form(None),
+    max_speakers: Optional[int] = Form(None),
+    language: str = Form("auto"),
 ):
     """Transcribe an uploaded audio file"""
     global transcription_service, current_model
@@ -258,18 +302,36 @@ async def transcribe_audio(
     try:
         # Check diarization capability
         model_info = transcription_service.get_model_info()
-        if enable_diarization and not model_info["supports_diarization"]:
+        
+        # Check if pyannote is available
+        pyannote_available = False
+        try:
+            from speaker_diarization import SpeakerDiarizationService
+            pyannote_available = True and HF_TOKEN is not None
+        except ImportError:
+            pyannote_available = False
+            
+        # Determine diarization support
+        whisper_diarization = model_info["supports_diarization"]
+        supports_diarization = whisper_diarization or pyannote_available
+        
+        if enable_diarization and not supports_diarization:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "Diarization requested but current model does not support it. "
-                    "Please use a model with '-tdrz' suffix."
+                    "error": "Diarization requested but not available. Either use a model with '-tdrz' suffix "
+                    "or install pyannote.audio and set a valid HF_TOKEN environment variable."
                 },
             )
 
         # Process the transcription
         result = transcription_service.transcribe(
-            audio_path=file_path, enable_diarization=enable_diarization
+            audio_path=file_path, 
+            enable_diarization=enable_diarization,
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+            language=language
         )
 
         # Check for errors
@@ -291,14 +353,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run the whisper.cpp FastAPI service")
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port to run the service on (default: 8000)"
+        "--port", type=int, default=PORT, help=f"Port to run the service on (default: {PORT})"
     )
     parser.add_argument(
-        "--host", type=str, default="0.0.0.0", help="Host to run the service on (default: 0.0.0.0)"
+        "--host", type=str, default=HOST, help=f"Host to run the service on (default: {HOST})"
     )
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on file changes")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on file changes", default=DEBUG)
 
     args = parser.parse_args()
 
-    logger.info(f"Starting server on {args.host}:{args.port}")
+    logger.info(f"Starting server on {args.host}:{args.port} (Debug mode: {args.reload})")
     uvicorn.run("main:app", host=args.host, port=args.port, reload=args.reload)

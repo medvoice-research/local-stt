@@ -1,10 +1,15 @@
-# API Dependencies
-fastapi==0.109.0
-uvicorn==0.27.0
-python-multipart==0.0.9
-pydantic==2.5.2
-requests==2.31.0
-ffmpeg-python==0.2.0
+# Core requirements for the API
+fastapi>=0.95.1
+uvicorn>=0.22.0
+python-multipart>=0.0.6
+ffmpeg-python>=0.2.0
+pydantic>=1.10.7
+requests>=2.28.2
+python-dotenv>=1.0.0
+
+# For speaker diarization
+torch>=2.0.0
+pyannote.audio>=3.1.0  # Required for speaker-diarization-3.1 model
 
 # Linting Tools
 black==23.12.1
