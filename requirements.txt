@@ -18,3 +18,6 @@ mypy==1.8.0
 flake8==7.0.0
 pylint==3.0.3
 types-requests==2.31.0.20240311
+
+# Kaggle
+kagglehub>=0.1.0

@@ -9,7 +9,7 @@ This project provides a FastAPI web service for offline transcription and diariz
 - **Web UI**: Easy-to-use web interface for transcription and diarization
 - **API Access**: RESTful API for programmatic access
 - **Multiple Models**: Support for various model sizes (tiny, base, small, medium, large)
-- **Diarization**: Speaker segmentation using both built-in tinydiarize (English-only) and advanced pyannote/speaker-diarization (multilingual)
+- **Diarization**: Speaker segmentation using pyannote/speaker-diarization-3.1, a state-of-the-art diarization system
 - **Offline Operation**: All processing happens locally, no data leaves your machine
 - **On-demand Model Downloads**: Automatic model management with visual indicators for download status
 - **Support for Various Audio Formats**: Through FFmpeg integration
@@ -54,9 +54,8 @@ This project provides a FastAPI web service for offline transcription and diariz
    # Create a symlink to whisper-cli
    make link-whisper
    
-   # Download specific models (e.g., base.en, small.en-tdrz)
+   # Download specific models (e.g., base.en, small.en)
    make download-model MODEL=base.en
-   make download-model MODEL=small.en-tdrz
    ```
 
 3. Run the service:
@@ -113,46 +112,157 @@ The service can be configured using environment variables. You can set them dire
 - `PORT`: The port number to run the service on (default: 8000)
 - `DEBUG`: Enable debug mode with auto-reload on file changes (default: false)
 
+## Kaggle Dataset Integration
+
+This project integrates with Kaggle's datasets API to automatically download and use the [mini-speech-diarization](https://www.kaggle.com/datasets/wiradkp/mini-speech-diarization) dataset for testing and development purposes.
+
+### Dataset Features
+
+- Pre-segmented audio files with speaker labels
+- Various conversational scenarios for testing diarization
+- Available through the `/kaggle-dataset` API endpoint
+- Automatically downloaded on service startup if credentials are provided
+
+### Configuration
+
+1. Get Kaggle API credentials from [Kaggle Settings](https://www.kaggle.com/settings) (Create New API Token)
+2. Add them to your `.env` file:
+   ```
+   KAGGLE_USERNAME=your_kaggle_username
+   KAGGLE_KEY=your_kaggle_api_key
+   ```
+
+### Accessing Dataset Information
+
+The dataset and its files can be viewed:
+- In the web UI on the main page
+- Via the `/kaggle-dataset` API endpoint
+- Used for testing diarization capabilities
+
 ## Available Models
 
 The service supports all models provided by whisper.cpp:
 
-| Model | Size | Memory Required | Relative Speed | Languages | Diarization |
-|-------|------|-----------------|----------------|-----------|-------------|
-| tiny.en | 75 MB  | ~273 MB | Fastest | English only | No |
-| base.en | 142 MB | ~388 MB | Fast | English only | No |
-| small.en | 466 MB | ~852 MB | Moderate | English only | No |
-| small.en-tdrz | ~466 MB | ~852 MB | Moderate | English only | Yes |
-| medium.en | 1.5 GB | ~2.1 GB | Slow | English only | No |
-| large | 2.9 GB | ~3.9 GB | Slowest | Multilingual | No |
+| Model | Size | Memory Required | Relative Speed | Languages |
+|-------|------|-----------------|----------------|-----------|
+| tiny.en | 75 MB  | ~273 MB | Fastest | English only |
+| base.en | 142 MB | ~388 MB | Fast | English only |
+| small.en | 466 MB | ~852 MB | Moderate | English only |
+| medium.en | 1.5 GB | ~2.1 GB | Slow | English only |
+| large | 2.9 GB | ~3.9 GB | Slowest | Multilingual |
 
 Each model is available in English-only variants (e.g., `tiny.en`) which are generally faster and more accurate for English content. For multilingual support, use models without the `.en` suffix.
 
-## Diarization Support
+> **Note:** All models can now be used with speaker diarization through the pyannote integration, regardless of model type or language support.
 
-The service offers two methods for speaker diarization:
+## Speaker Diarization with Pyannote
 
-### Method 1: Built-in Tinydiarize (English-only)
+This project utilizes [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1), a state-of-the-art speaker diarization system from Hugging Face to add speaker identification capabilities to whisper.cpp transcriptions. The 3.1 version offers improved performance with pure PyTorch implementation (no onnxruntime dependency).
 
-For English-only speaker diarization, use models with the `-tdrz` suffix, such as `small.en-tdrz`. This uses the built-in diarization capability in specific whisper.cpp models from the [TinyDiarize repository](https://github.com/akashmjn/tinydiarize).
+> **Note:** The tinydiarize feature (models with `-tdrz` suffix) is no longer available in recent whisper.cpp versions. Our system now exclusively uses the pyannote integration for all speaker diarization needs.
 
-**Key characteristics:**
-- Only works with English language content
-- Faster processing time
-- Works without additional setup
-- Uses models with `-tdrz` suffix
-- Diarization will mark speaker changes in the transcription output with `[SPEAKER_TURN]` markers
+### Integration Architecture
 
-### Method 2: Pyannote Speaker Diarization (Multilingual)
+```mermaid
+flowchart TD
+    A[Audio File] --> B[FFmpeg Conversion to 16kHz WAV]
+    
+    B --> C[Whisper.cpp Pipeline]
+    C -->|Text Segments with Timestamps| E[Integration Layer]
+    
+    B --> D[Pyannote Pipeline]
+    D -->|Speaker Timeline with IDs| E
+    
+    E --> F[Combined Output with Speaker Labels]
+    
+    subgraph "Speaker Detection Process"
+    D -->|1. Voice Activity Detection| D1[VAD Segments]
+    D1 -->|2. Speaker Embedding Extraction| D2[Speech Embeddings]
+    D2 -->|3. Clustering & Classification| D3[Speaker IDs]
+    end
+    
+    subgraph "Alignment Algorithm"
+    E -->|For each segment| E1[Find Maximum Temporal Overlap]
+    E1 -->|Assign Speaker| E2[Generate Enriched Segments]
+    E2 -->|Format Output| E3[Create Rich Transcription]
+    end
+    
+    style A fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style B fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    style C fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style D fill:#fff8e1,stroke:#ffa000,stroke-width:2px
+    style E fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style F fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+```
 
-For more advanced speaker diarization that works with any language, the service integrates with the [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) model from Hugging Face. This latest version runs in pure PyTorch (without onnxruntime) for easier deployment and potentially faster inference.
+### Technical Implementation 
 
-**Key characteristics:**
-- Works with any language supported by whisper.cpp
-- More accurate speaker identification
-- Returns individual speaker labels (e.g., "SPEAKER_00", "SPEAKER_01")
-- Can specify the exact number of speakers or min/max speaker range
-- Requires a Hugging Face access token
+#### 1. Pipeline Components
+
+- **Whisper.cpp Transcription Engine**:
+  - Handles speech-to-text conversion
+  - Provides timestamped text segments
+  - Works with any whisper.cpp model (tiny through large)
+  - Supports multiple languages based on model capabilities
+
+- **Pyannote Speaker Diarization**:
+  - Identifies unique speakers in the audio
+  - Creates a timeline of who speaks when
+  - Can work with known or unknown number of speakers
+  - Requires a Hugging Face access token
+
+#### 2. Data Flow & Integration
+
+1. **Parallel Processing**:
+   - Audio is processed simultaneously by both whisper.cpp and pyannote
+   - Both systems work on the same 16kHz WAV file created by FFmpeg
+   - Results are merged after both processes complete
+
+2. **Advanced Alignment Algorithm**:
+   ```python
+   def align_diarization_with_transcription(diarization_result, transcription_segments):
+       # For each transcription segment
+       for segment in transcription_segments:
+           # Get start/end times
+           start, end = segment["start"], segment["end"]
+           
+           # Find all speaker turns that overlap with this segment
+           overlapping_speakers = {}
+           for speaker_segment in diarization_result["segments"]:
+               overlap = calculate_overlap(segment, speaker_segment)
+               if overlap > 0:
+                   speaker = speaker_segment["speaker"]
+                   overlapping_speakers[speaker] = overlapping_speakers.get(speaker, 0) + overlap
+           
+           # Assign the speaker with maximum overlap
+           if overlapping_speakers:
+               segment["speaker"] = max(overlapping_speakers.items(), key=lambda x: x[1])[0]
+       
+       return transcription_segments
+   ```
+
+3. **Output Structure**:
+   - Original transcription with added speaker labels
+   - Formatted speaker-labeled text for better readability
+   - Timestamped segments with speaker information
+   - Metadata about number of speakers detected
+
+#### 3. Tuning Options
+
+The system supports several parameters to tune the diarization process:
+
+- **num_speakers**: Exact number of speakers when known
+- **min_speakers**: Lower bound for speaker count
+- **max_speakers**: Upper bound for speaker count
+- **language**: Language code to help transcription accuracy
+
+### Advantages of Pyannote Integration
+
+- **Language Agnostic**: Works with any language supported by the whisper model
+- **High Accuracy**: State-of-the-art speaker identification performance
+- **Flexible Speaker Count**: Can auto-detect speaker count or work with constraints
+- **Clean Output Format**: Produces both human-readable and machine-parseable outputs
+- **Perfect for Meetings**: Excels at distinguishing multiple speakers in conversation
 
 To use the advanced diarization:
 
@@ -205,12 +315,12 @@ Example response:
   {
     "name": "base.en",
     "path": "models/ggml-base.en.bin",
-    "supports_diarization": false,
+    "supports_diarization": true,
     "is_downloaded": true
   },
   {
-    "name": "small.en-tdrz",
-    "path": "models/ggml-small.en-tdrz.bin",
+    "name": "small.en",
+    "path": "models/ggml-small.en.bin",
     "supports_diarization": true,
     "is_downloaded": true
   }
@@ -220,12 +330,12 @@ Example response:
 ### Download a model:
 
 ```bash
-curl -X POST http://localhost:8000/models/small.en-tdrz/download
+curl -X POST http://localhost:8000/models/small.en/download
 ```
 
 ### Transcribe an audio file:
 
-Basic usage:
+Basic usage without speaker diarization:
 ```bash
 curl -X POST http://localhost:8000/transcribe \
   -F "audio_file=@example.mp3" \
@@ -233,15 +343,15 @@ curl -X POST http://localhost:8000/transcribe \
   -F "enable_diarization=false"
 ```
 
-With built-in tinydiarize (English only):
+With speaker diarization (works with any model):
 ```bash
 curl -X POST http://localhost:8000/transcribe \
   -F "audio_file=@example.mp3" \
-  -F "model=small.en-tdrz" \
+  -F "model=base.en" \
   -F "enable_diarization=true"
 ```
 
-With pyannote speaker diarization (works with any model and language):
+With specified number of speakers:
 ```bash
 curl -X POST http://localhost:8000/transcribe \
   -F "audio_file=@meeting.mp3" \

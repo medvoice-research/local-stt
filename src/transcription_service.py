@@ -3,7 +3,8 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+
+# All of these imports are used in method signatures
 
 import ffmpeg
 
@@ -13,6 +14,7 @@ from config import TEMP_UPLOAD_DIR as DEFAULT_TEMP_DIR
 # Import speaker diarization service (if available)
 try:
     from speaker_diarization import SpeakerDiarizationService
+
     PYANNOTE_AVAILABLE = True
 except ImportError:
     PYANNOTE_AVAILABLE = False
@@ -36,7 +38,7 @@ class TranscriptionService:
         self.whisper_bin = whisper_bin
         self.temp_dir = Path(temp_dir) if temp_dir is not None else DEFAULT_TEMP_DIR
         self.hf_token = hf_token
-        
+
         # Initialize speaker diarization service if available
         self.diarization_service = None
         if PYANNOTE_AVAILABLE and hf_token:
@@ -67,7 +69,15 @@ class TranscriptionService:
             logger.error(f"Error converting audio: {e.stderr.decode() if e.stderr else str(e)}")
             raise
 
-    def transcribe(self, audio_path, enable_diarization=False, num_speakers=None, min_speakers=None, max_speakers=None, language="auto"):
+    def transcribe(
+        self,
+        audio_path,
+        enable_diarization=False,
+        num_speakers=None,
+        min_speakers=None,
+        max_speakers=None,
+        language="auto",
+    ):
         """
         Transcribe audio file using whisper.cpp
 
@@ -90,14 +100,18 @@ class TranscriptionService:
                 "-f",
                 str(wav_path),
                 "-oj",  # Output JSON
-                "-l", language  # Use specified language or auto-detect
+                "-l",
+                language,  # Use specified language or auto-detect
             ]
 
             # Check if we should use whisper.cpp's built-in diarization
             use_whisper_diarization = enable_diarization and "tdrz" in str(self.model_path)
-            use_pyannote_diarization = (enable_diarization and self.diarization_service is not None 
-                                       and not use_whisper_diarization)
-            
+            use_pyannote_diarization = (
+                enable_diarization
+                and self.diarization_service is not None
+                and not use_whisper_diarization
+            )
+
             if use_whisper_diarization:
                 # Add diarization parameter if model supports it (e.g. small.en-tdrz)
                 cmd.append("-tdrz")
@@ -132,19 +146,19 @@ class TranscriptionService:
 
             try:
                 # Try to parse as JSON first (if -oj flag worked as expected)
-                transcription_result = json.loads(output)
-                
+                transcription_result = json.loads(output)  # type: ignore [assignment]
+
                 # Apply pyannote diarization if requested and available
-                if use_pyannote_diarization:
+                if use_pyannote_diarization and self.diarization_service is not None:
                     logger.info("Applying pyannote speaker diarization")
                     try:
                         diarization_result = self.diarization_service.diarize(
                             audio_path=wav_path,
                             num_speakers=num_speakers,
                             min_speakers=min_speakers,
-                            max_speakers=max_speakers
+                            max_speakers=max_speakers,
                         )
-                        
+
                         # Align diarization with transcription segments
                         if "segments" in transcription_result:
                             # Convert segment timestamps to seconds if needed
@@ -153,21 +167,37 @@ class TranscriptionService:
                                     segment["start"] = segment["t0"]
                                 if "end" not in segment and "t1" in segment:
                                     segment["end"] = segment["t1"]
-                            
+
                             # Add speaker labels to segments
-                            transcription_result["segments"] = self.diarization_service.align_diarization_with_transcription(
+                            transcription_result[
+                                "segments"
+                            ] = self.diarization_service.align_diarization_with_transcription(
                                 diarization_result=diarization_result,
-                                transcription_segments=transcription_result["segments"]
+                                transcription_segments=transcription_result["segments"],
                             )
-                            
+
                             # Add diarization metadata
                             transcription_result["diarization"] = {
                                 "num_speakers": diarization_result["num_speakers"],
-                                "method": "pyannote"
+                                "method": "pyannote",
                             }
+
+                            # Format the full text with speaker labels for better readability
+                            if "text" in transcription_result:
+                                speaker_texts = []
+                                for segment in transcription_result["segments"]:
+                                    if "speaker" in segment and "text" in segment:
+                                        speaker_texts.append(
+                                            f"{segment['speaker']}: {segment['text']}"
+                                        )
+
+                                # Update the full text to include speaker information
+                                transcription_result["text_with_speakers"] = "\n".join(
+                                    speaker_texts
+                                )
                     except Exception as e:
                         logger.error(f"Error during pyannote diarization: {e}")
-                
+
                 return transcription_result
             except json.JSONDecodeError:
                 logger.info("Output is not JSON format, parsing as text")
@@ -203,11 +233,63 @@ class TranscriptionService:
 
                         full_text += text.strip() + " "
 
-                return {
+                # Create result in a similar format to the JSON output for consistency
+                result = {
                     "text": full_text.strip(),
                     "segments": segments,
                     "language": "en",  # Assuming English by default
                 }
+
+                # Apply pyannote diarization if requested and available for non-JSON output too
+                if enable_diarization and self.diarization_service is not None:
+                    try:
+                        logger.info("Applying pyannote speaker diarization to non-JSON output")
+                        diarization_result = self.diarization_service.diarize(
+                            audio_path=wav_path,
+                            num_speakers=num_speakers,
+                            min_speakers=min_speakers,
+                            max_speakers=max_speakers,
+                        )
+
+                        # Add timestamp fields if not present
+                        for segment in result["segments"]:
+                            if "start" not in segment and "t0" in segment:
+                                segment["start"] = segment["t0"]
+                            if "end" not in segment and "t1" in segment:
+                                segment["end"] = segment["t1"]
+
+                        # Align diarization with segments
+                        result[
+                            "segments"
+                        ] = self.diarization_service.align_diarization_with_transcription(
+                            diarization_result=diarization_result,
+                            transcription_segments=result["segments"],
+                        )
+
+                        # Add diarization metadata
+                        result["diarization"] = {
+                            "num_speakers": diarization_result["num_speakers"],
+                            "method": "pyannote",
+                        }
+
+                        # Generate text with speakers
+                        speaker_texts = []
+                        for segment in result["segments"]:
+                            if "speaker" in segment and "text" in segment:
+                                speaker_texts.append(f"{segment['speaker']}: {segment['text']}")
+
+                        if speaker_texts:
+                            result["text_with_speakers"] = "\n".join(speaker_texts)
+
+                        logger.info(
+                            f"Added diarization to {len(result['segments'])} segments with "
+                            f"{diarization_result['num_speakers']} speakers"
+                        )
+
+                    except Exception as e:
+                        logger.error(f"Error applying pyannote diarization to non-JSON output: {e}")
+
+                return result
 
         except subprocess.CalledProcessError as e:
             error_message = e.stderr if e.stderr else str(e)

@@ -211,6 +211,14 @@
 <body>
     <h1>Whisper.cpp Transcription Service</h1>
     
+    <div class="container" id="kaggle-dataset-container" style="display: none;">
+        <h2>Kaggle Dataset: Mini Speech Diarization</h2>
+        <p>This application has loaded the Mini Speech Diarization dataset from Kaggle.</p>
+        <div id="kaggle-dataset-info">Loading dataset information...</div>
+        <button id="show-dataset-files-btn">Show Dataset Files</button>
+        <div id="dataset-files-list" style="display: none; max-height: 300px; overflow-y: auto; margin-top: 10px;"></div>
+    </div>
+    
     <div class="container">
         <h2>Upload Audio</h2>
         <div id="error-container" class="error" style="display: none;"></div>
@@ -608,7 +616,12 @@
             const segmentsContainer = document.getElementById('segments-container');
             
             // Display transcription
-            transcriptionDiv.textContent = data.text;
+            if (data.text_with_speakers && data.diarization) {
+                // If we have speaker-labeled text, use that for better readability
+                transcriptionDiv.innerHTML = data.text_with_speakers.replace(/\n/g, '<br>');
+            } else {
+                transcriptionDiv.textContent = data.text;
+            }
             
             // Display segments
             segmentsContainer.innerHTML = '';
@@ -616,17 +629,26 @@
                 const segmentDiv = document.createElement('div');
                 segmentDiv.className = 'segment';
                 
-                // Check for speaker change
-                if (segment.text.includes('[SPEAKER_TURN]')) {
+                // Check if this segment has speaker info
+                if (segment.speaker) {
                     segmentDiv.classList.add('speaker-change');
-                    segment.text = segment.text.replace('[SPEAKER_TURN]', '');
                 }
                 
                 // Format timestamp
-                const t0 = formatTime(segment.t0);
-                const t1 = formatTime(segment.t1);
+                const start = segment.t0 || segment.start;
+                const end = segment.t1 || segment.end;
+                const t0 = formatTime(start);
+                const t1 = formatTime(end);
                 
-                segmentDiv.innerHTML = `<span class="timestamp">[${t0} → ${t1}]</span> ${segment.text}`;
+                let segmentText = segment.text;
+                
+                // Add speaker label if available
+                if (segment.speaker) {
+                    segmentDiv.innerHTML = `<span class="timestamp">[${t0} → ${t1}]</span> <strong>${segment.speaker}:</strong> ${segmentText}`;
+                } else {
+                    segmentDiv.innerHTML = `<span class="timestamp">[${t0} → ${t1}]</span> ${segmentText}`;
+                }
+                
                 segmentsContainer.appendChild(segmentDiv);
             });
             
@@ -651,6 +673,90 @@
         function hideError() {
             const errorContainer = document.getElementById('error-container');
             errorContainer.style.display = 'none';
+        }
+        
+        // Check for Kaggle dataset on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchKaggleDatasetInfo();
+        });
+        
+        function fetchKaggleDatasetInfo() {
+            fetch('/kaggle-dataset')
+                .then(response => {
+                    if (!response.ok) {
+                        if (response.status === 404) {
+                            // Dataset not loaded, hide the container
+                            document.getElementById('kaggle-dataset-container').style.display = 'none';
+                            return null;
+                        }
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data) {
+                        displayKaggleDatasetInfo(data);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching Kaggle dataset info:', error);
+                });
+        }
+        
+        function displayKaggleDatasetInfo(data) {
+            const container = document.getElementById('kaggle-dataset-container');
+            const infoDiv = document.getElementById('kaggle-dataset-info');
+            
+            // Display dataset basic info
+            infoDiv.innerHTML = `
+                <p><strong>Dataset Name:</strong> ${data.dataset_name}</p>
+                <p><strong>Path:</strong> ${data.path}</p>
+                <p><strong>Files:</strong> ${data.files?.length || 0} files available</p>
+            `;
+            
+            // Show the container
+            container.style.display = 'block';
+            
+            // Set up button event listener
+            const showFilesBtn = document.getElementById('show-dataset-files-btn');
+            const filesList = document.getElementById('dataset-files-list');
+            
+            showFilesBtn.addEventListener('click', function() {
+                if (filesList.style.display === 'none') {
+                    // Show files list
+                    let filesContent = '<ul style="list-style-type: none; padding-left: 0;">';
+                    data.files.forEach(file => {
+                        filesContent += `
+                            <li style="margin-bottom: 8px; padding: 5px; border-bottom: 1px solid #eee;">
+                                <strong>${file.name}</strong><br>
+                                <small>Path: ${file.path}</small><br>
+                                <small>Size: ${formatBytes(file.size_bytes)}</small>
+                            </li>
+                        `;
+                    });
+                    filesContent += '</ul>';
+                    
+                    filesList.innerHTML = filesContent;
+                    filesList.style.display = 'block';
+                    showFilesBtn.textContent = 'Hide Dataset Files';
+                } else {
+                    // Hide files list
+                    filesList.style.display = 'none';
+                    showFilesBtn.textContent = 'Show Dataset Files';
+                }
+            });
+        }
+        
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
     </script>
 </body>

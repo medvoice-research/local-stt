@@ -3,8 +3,9 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
+import kagglehub  # Import kagglehub for dataset access
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,24 +15,26 @@ from pydantic import BaseModel
 
 # Import centralized configuration
 from config import (
-    ROOT_DIR,
-    MODELS_DIR,
-    TEMP_UPLOAD_DIR,
-    WHISPER_BIN_PATH,
+    DEBUG,
     DEFAULT_MODEL,
-    STATIC_DIR,
     HF_TOKEN,
     HOST,
+    KAGGLE_DATASET,
+    KAGGLE_KEY,
+    KAGGLE_USERNAME,
+    MODELS_DIR,
     PORT,
-    DEBUG,
+    STATIC_DIR,
+    TEMP_UPLOAD_DIR,
+    WHISPER_BIN_PATH,
 )
 
 # Import model_manager functions
 from model_manager import (
-    clean_model_symlinks, 
-    download_model, 
-    list_available_models, 
-    list_downloaded_models
+    clean_model_symlinks,
+    download_model,
+    list_available_models,
+    list_downloaded_models,
 )
 from transcription_service import TranscriptionService
 
@@ -62,8 +65,10 @@ class TranscriptionRequest(BaseModel):
 
 class TranscriptionResponse(BaseModel):
     text: str
+    text_with_speakers: Optional[str] = None
     segments: List[dict]
     language: str
+    diarization: Optional[Dict] = None
 
 
 def ensure_temp_directory():
@@ -92,30 +97,53 @@ def clean_temp_directory():
         return False
 
 
+# Global variable to store Kaggle dataset path
+kaggle_dataset_path = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event for FastAPI"""
-    global transcription_service, current_model
-    
+    global transcription_service, current_model, kaggle_dataset_path
+
     # Code to run on startup
     logger.info("Starting up the FastAPI application")
     ensure_temp_directory()
-    
+
     # Clean up model symlinks to ensure consistent file paths
     logger.info("Cleaning up model symlinks")
     clean_model_symlinks()
-    
+
+    # Set Kaggle credentials from environment variables
+    if KAGGLE_USERNAME and KAGGLE_KEY:
+        os.environ["KAGGLE_USERNAME"] = KAGGLE_USERNAME
+        os.environ["KAGGLE_KEY"] = KAGGLE_KEY
+        logger.info("Kaggle credentials set from environment variables")
+
+        # Download Kaggle dataset
+        try:
+            logger.info(f"Downloading dataset from Kaggle: {KAGGLE_DATASET}")
+            kaggle_dataset_path = kagglehub.dataset_download(KAGGLE_DATASET)
+            logger.info(f"Kaggle dataset downloaded to: {kaggle_dataset_path}")
+        except Exception as e:
+            logger.error(f"Failed to download Kaggle dataset: {str(e)}")
+    else:
+        logger.warning("Kaggle credentials not set. Dataset download skipped.")
+
     # Initialize transcription service with default model
     logger.info(f"Initializing transcription service with model {DEFAULT_MODEL}")
     success = initialize_transcription_service(DEFAULT_MODEL)
     if not success:
-        logger.warning(f"Failed to initialize default model {DEFAULT_MODEL}. " 
-                      f"Transcription service will be initialized on first request.")
-    
+        logger.warning(
+            f"Failed to initialize default model {DEFAULT_MODEL}. "
+            f"Transcription service will be initialized on first request."
+        )
+
     yield
-    
+
     # Cleanup on shutdown
     clean_temp_directory()
+
 
 # Initialize FastAPI with lifespan
 app = FastAPI(
@@ -147,10 +175,10 @@ def initialize_transcription_service(model_name: str):
         model_path = download_model(model_name)
         if model_path and model_path.exists():
             transcription_service = TranscriptionService(
-                model_path=model_path, 
-                whisper_bin=WHISPER_BIN_PATH, 
+                model_path=model_path,
+                whisper_bin=WHISPER_BIN_PATH,
                 temp_dir=TEMP_UPLOAD_DIR,
-                hf_token=HF_TOKEN
+                hf_token=HF_TOKEN,
             )
             current_model = model_name
             logger.info(f"Initialized transcription service with model {model_name}")
@@ -191,7 +219,51 @@ async def root():
             {"path": "/", "method": "GET", "description": "This information"},
             {"path": "/models", "method": "GET", "description": "List available models"},
             {"path": "/transcribe", "method": "POST", "description": "Transcribe an audio file"},
+            {
+                "path": "/kaggle-dataset",
+                "method": "GET",
+                "description": "Information about the downloaded Kaggle dataset",
+            },
         ],
+    }
+
+
+@app.get("/kaggle-dataset")
+async def get_kaggle_dataset_info():
+    """Get information about the downloaded Kaggle dataset"""
+    global kaggle_dataset_path
+
+    if not kaggle_dataset_path:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Kaggle dataset not downloaded. Check Kaggle credentials."},
+        )
+
+    # Get list of files in the dataset directory
+    dataset_files = []
+    try:
+        dataset_path = Path(kaggle_dataset_path)
+        if dataset_path.exists() and dataset_path.is_dir():
+            for file_path in dataset_path.rglob("*"):
+                if file_path.is_file():
+                    rel_path = file_path.relative_to(dataset_path)
+                    dataset_files.append(
+                        {
+                            "name": str(rel_path),
+                            "path": str(file_path),
+                            "size_bytes": file_path.stat().st_size,
+                        }
+                    )
+    except Exception as e:
+        logger.error(f"Error listing Kaggle dataset files: {str(e)}")
+        return JSONResponse(
+            status_code=500, content={"error": f"Error listing dataset files: {str(e)}"}
+        )
+
+    return {
+        "dataset_name": KAGGLE_DATASET,
+        "path": str(kaggle_dataset_path),
+        "files": dataset_files,
     }
 
 
@@ -206,8 +278,11 @@ async def get_models():
     # Check if pyannote is available for advanced diarization
     pyannote_available = False
     try:
-        from speaker_diarization import SpeakerDiarizationService
-        pyannote_available = True and HF_TOKEN is not None
+        # Check if module is available without importing it
+        import importlib.util
+
+        spec = importlib.util.find_spec("speaker_diarization")
+        pyannote_available = spec is not None and HF_TOKEN is not None
     except ImportError:
         pyannote_available = False
 
@@ -219,7 +294,7 @@ async def get_models():
 
         # Determine if model supports diarization
         whisper_diarization = bool(model_info.get("diarization", False) or "tdrz" in model_name)
-        
+
         # All models support diarization via pyannote if it's available
         supports_diarization = whisper_diarization or pyannote_available
 
@@ -302,41 +377,70 @@ async def transcribe_audio(
     try:
         # Check diarization capability
         model_info = transcription_service.get_model_info()
-        
+
         # Check if pyannote is available
         pyannote_available = False
         try:
-            from speaker_diarization import SpeakerDiarizationService
-            pyannote_available = True and HF_TOKEN is not None
+            # Check if module is available without importing it
+            import importlib.util
+
+            spec = importlib.util.find_spec("speaker_diarization")
+            pyannote_available = spec is not None and HF_TOKEN is not None
         except ImportError:
             pyannote_available = False
-            
+
         # Determine diarization support
         whisper_diarization = model_info["supports_diarization"]
         supports_diarization = whisper_diarization or pyannote_available
-        
+
         if enable_diarization and not supports_diarization:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "Diarization requested but not available. Either use a model with '-tdrz' suffix "
-                    "or install pyannote.audio and set a valid HF_TOKEN environment variable."
+                    "error": "Diarization unavailable. Install pyannote.audio "
+                    "and set a valid HF_TOKEN environment variable."
                 },
             )
 
         # Process the transcription
         result = transcription_service.transcribe(
-            audio_path=file_path, 
+            audio_path=file_path,
             enable_diarization=enable_diarization,
             num_speakers=num_speakers,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
-            language=language
+            language=language,
         )
 
         # Check for errors
         if "error" in result:
             return JSONResponse(status_code=500, content=result)
+
+        # Log diarization results for debugging
+        if enable_diarization:
+            if "diarization" in result:
+                logger.info(
+                    f"Diarization completed with "
+                    f"{result['diarization'].get('num_speakers', 0)} speakers detected"
+                )
+            else:
+                logger.warning("Diarization was enabled but no diarization data was returned")
+
+            if "text_with_speakers" in result:
+                logger.info("Speaker-labeled text was generated")
+            else:
+                logger.warning("No speaker-labeled text was generated")
+
+            # Check if speaker labels were assigned to segments
+            has_speaker_labels = False
+            if "segments" in result:
+                for segment in result["segments"]:
+                    if "speaker" in segment:
+                        has_speaker_labels = True
+                        break
+
+            if not has_speaker_labels:
+                logger.warning("No segments have speaker labels assigned")
 
         return result
     except Exception as e:
@@ -358,7 +462,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--host", type=str, default=HOST, help=f"Host to run the service on (default: {HOST})"
     )
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on file changes", default=DEBUG)
+    parser.add_argument(
+        "--reload", action="store_true", help="Enable auto-reload on file changes", default=DEBUG
+    )
 
     args = parser.parse_args()
 
