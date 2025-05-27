@@ -6,7 +6,7 @@ This project provides a FastAPI web service for offline transcription and diariz
 
 ## Demo
 
-<video src="assets/cpu-base-model-demo.mp4" controls></video>
+https://github.com/user-attachments/assets/99068a21-f617-43bd-bb06-0ed052f75a9b
 
 ## Key Features
 
