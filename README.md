@@ -4,6 +4,10 @@ This project provides a FastAPI web service for offline transcription and diariz
 
 ![Whisper.cpp FastAPI Service](https://user-images.githubusercontent.com/1991296/235238348-05d0f6a4-da44-4900-a1de-d0707e75b763.jpeg)
 
+## Demo
+
+<video src="assets/cpu-base-model-demo.mp4" controls></video>
+
 ## Key Features
 
 - **Web UI**: Easy-to-use web interface for transcription and diarization
