@@ -6,7 +6,7 @@ This project provides a FastAPI web service for offline transcription and diariz
 
 ## Demo
 
-https://github.com/user-attachments/assets/99068a21-f617-43bd-bb06-0ed052f75a9b
+https://github.com/user-attachments/assets/f3786598-1f2a-4d07-919e-8b99dfa1de3e
 
 ## Key Features
 
