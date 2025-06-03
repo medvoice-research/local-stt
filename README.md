@@ -1,4 +1,4 @@
-# Whisper.cpp FastAPI Service
+# Local Speech-To-Text
 
 This project provides a FastAPI web service for offline transcription and diarization using whisper.cpp, allowing you to run high-quality speech recognition locally without sending data to external services.
 
